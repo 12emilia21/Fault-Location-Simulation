@@ -28,7 +28,7 @@ Imax    = Iload*vi_scale;     % Rated current and power values
 
 % Load/fault definitions
 R_load = Vout^2/Pload;
-R_fault = 0.01; %0.14
+R_fault = 0.01; 
 
 % Board components 
 L_real = 82e-6;     % From calculations (@50khz): 102.4 uH
@@ -60,7 +60,7 @@ R_max=P_max_loss/(Imax^2);
 length_max=R_max/R_line; 
 
 % - Before the location of the fault
-m1=0.25;%0.25;%0.5;%0.75;%1;
+m1=0.1;%0.25;%0.5;%0.75;%1;
 L_line_1=m1*length_max*L_line;
 R_line_1=m1*length_max*R_line;
 % - After the location of the fault
@@ -72,7 +72,7 @@ res_freq        = 1/(2*pi*sqrt(C_real*L_real*(L_line_1+L_line_2)/(L_real+L_line_
 res_freq_period = 1/res_freq;
 fault_res_freq  = 1/(2*pi*sqrt(C_real*(L_real*L_line_1)/(L_real+L_line_1)));
 fault_res_prd   = 1/res_freq;
-res_freq_conv   =  1/(2*pi*sqrt(C_real*L_real));
+res_freq_conv   = 1/(2*pi*sqrt(C_real*L_real));
 
 %Expected estimations without faults
 fprintf('Expected components before fault\n');
@@ -84,14 +84,13 @@ R_total = R_line_1 + ((R_fault*(R_line_2+R_load))/(R_fault+(R_line_2+R_load)))
 L_total = L_line_1 
 
 %Events moments
-load_step_time  = 0.3; 
-fault_step_time = 0.5; 
+load_step_time  = 0.1; 
+fault_step_time = 0.2; 
 
 %Pre-estimation filtering 
 f_co        = 10*res_freq_conv;    % Cut-off frequency
 tau_LPF     = 1/(2*pi*f_co); 
 noise_tsmpl = Tsmpl;               % To account for noise in the measurements
-%Definir BW 1/(2*pi*RC)
 
 % Load selector 
     % Constant impedance load = 0
@@ -108,22 +107,14 @@ sim_sel = 1;
 v_noise_var  = 0.01*vo_ripple; 
 i_noise_var  = 0.001*il_ripple;
 il_var       = 4*i_noise_var; 
-%noise_thresh = sqrt(4*i_noise_var);
 
 %Elypse area (based on vo and il)
 vo_el = 0.02*Vout;    % Admissible voltage to consider it is steady-state
 il_el = 0.25*Iload;   % Admissible current to consider it is steady-state
 
 % Count to gather information
-res_cycles = 2; 
+res_cycles = 4; 
 count      = ceil(res_cycles/(Tsmpl*res_freq_conv)); 
-
-
-% ADC scaling 
-%v_max   = 1.1*Vin; 
-%i_max   = 1.5*Iload; 
-%v_offst = 0; 
-%i_offst = 0;
 
 % Sensor sat 
 v_sat = 20; %62; 
@@ -150,8 +141,14 @@ i_offst_perc = i_offst/i_tot;
 
 
 %Run simulation
-sim('ls_fault_sw_4rt_10khz.slx');
+sim('ls_fault_sw_4rt_10khz_bis.slx');
 %sim('ls_fault_sw_4rt.slx');
+
+% Debug results 
+idx2 = i_smpl.time >= (fault_step_time-10*Tsmpl) & i_smpl.time <= (fault_step_time+2*count*Tsmpl);
+
+sim_i_smpl  = i_smpl.signals.values(idx2,:); 
+sim_di_smpl = di_smpl.signals.values(idx2,:); 
 
 %Almacenamiento de resultados 
 %{

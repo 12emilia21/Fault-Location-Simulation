@@ -60,7 +60,7 @@ R_max=P_max_loss/(Imax^2);
 length_max=R_max/R_line; 
 
 % - Before the location of the fault
-m1=0.1;%0.25;%0.5;%0.75;%1;
+m1=0.01;
 L_line_1=m1*length_max*L_line;
 R_line_1=m1*length_max*R_line;
 % - After the location of the fault
@@ -113,7 +113,7 @@ vo_el = 0.02*Vout;    % Admissible voltage to consider it is steady-state
 il_el = 0.25*Iload;   % Admissible current to consider it is steady-state
 
 % Count to gather information
-res_cycles = 4; 
+res_cycles = 2; 
 count      = ceil(res_cycles/(Tsmpl*res_freq_conv)); 
 
 % Sensor sat 
@@ -139,8 +139,14 @@ i_max        = i_tot-i_offst;
 i_max_perc   = i_max/i_tot;
 i_offst_perc = i_offst/i_tot; 
 
+% Block processing 
+norm     = 0;
+n_blks   = 3;
+blk_an   = 3;    % analyzed block (1, ..., n_blks)
+offset   = (blk_an-1)*floor(count/n_blks);
 
-%Run simulation
+
+% Run simulation
 sim('ls_fault_sw_4rt_10khz_bis.slx');
 %sim('ls_fault_sw_4rt.slx');
 

@@ -6,11 +6,9 @@
 #define COUNT    ParamRealData(1,0)
 #define V_SAT    ParamRealData(2,0)
 #define I_SAT    ParamRealData(3,0)
-#define R_REAL   ParamRealData(4,0)
-#define L_REAL   ParamRealData(5,0)
-#define NORM     ParamRealData(6,0)
-#define OFFSET   ParamRealData(7,0)
-#define BLK_DATA ParamRealData(8,0)
+#define NORM     ParamRealData(4,0)
+#define OFFSET   ParamRealData(5,0)
+#define N_BLK    ParamRealData(6,0)
 
 static double i_buf[MAX_COUNT+1];   
 static double v_buf[MAX_COUNT+1];   
@@ -26,14 +24,10 @@ static int en_prev = 0;
 
 static double R_est   = 0;
 static double L_est   = 0;
-static double R_error = 0;
-static double L_error = 0;
 
 // Outputs
 static double  R_out   = 0; 
 static double  L_out   = 0; 
-static double  R_err   = 0; 
-static double  L_err   = 0;
 static double  i_smpl  = 0;
 static double  di_smpl = 0;
 
@@ -148,10 +142,8 @@ void LS_QR(int n_smpls, int offset, double *sol){
 
 void solve( double io_sim,  double vo_sim,       double Ts,
             double enable,  double enable_fault, int count,
-            int    norm,    int offset,          int blk_data, 
-            double R_real,  double L_real,
-            double *R_out,  double *L_out,
-            double *R_err,  double *L_err, 
+            int    norm,    int offset,          int n_blk, 
+            double *R_out,  double *L_out, 
             double *i_smpl, double *di_smpl)
 {
     int N = count;
@@ -162,6 +154,7 @@ void solve( double io_sim,  double vo_sim,       double Ts,
     int last     ;
 	int second   ;
 	int prev     ;
+	int n_smpl = N/n_blk;
 
     if(!en_l && !en_prev && enable > 0) {
         en_l = 1;
@@ -232,20 +225,15 @@ void solve( double io_sim,  double vo_sim,       double Ts,
 
             double sol[2]={0};
 
-            LS_QR(blk_data, offset, sol);
+            LS_QR(n_smpl, offset, sol);
             
             if(enable_fault){
                 R_est = sol[0]/i_max;
                 L_est = sol[1]/di_max;
-
-                R_error = fabs((R_est-R_real)/R_real)*100.0;
-                L_error = fabs((L_est-L_real)/L_real)*100.0;
             }
             else{
                 R_est = 0;
                 L_est = 0;
-                R_error = 0;
-                L_error = 0;
             }
 
             en_l = 0; // batch completo
@@ -256,7 +244,4 @@ void solve( double io_sim,  double vo_sim,       double Ts,
 
     *R_out = R_est;
     *L_out = L_est;
-    *R_err = R_error;
-    *L_err = L_error; 
-
 }

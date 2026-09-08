@@ -60,7 +60,7 @@ R_max=P_max_loss/(Imax^2);
 length_max=R_max/R_line; 
 
 % - Before the location of the fault
-m1=0.01;
+m1=0.5;
 L_line_1=m1*length_max*L_line;
 R_line_1=m1*length_max*R_line;
 % - After the location of the fault
@@ -141,8 +141,8 @@ i_offst_perc = i_offst/i_tot;
 
 % Block processing 
 norm     = 0;
-n_blks   = 3;
-blk_an   = 3;    % analyzed block (1, ..., n_blks)
+n_blks   = 1;
+blk_an   = 1;    % analyzed block (1, ..., n_blks)
 offset   = (blk_an-1)*floor(count/n_blks);
 
 
@@ -151,7 +151,7 @@ sim('ls_fault_sw_4rt_10khz_bis.slx');
 %sim('ls_fault_sw_4rt.slx');
 
 % Debug results 
-idx2 = i_smpl.time >= (fault_step_time-10*Tsmpl) & i_smpl.time <= (fault_step_time+2*count*Tsmpl);
+idx2 = i_smpl.time >= (fault_step_time-10*Tsmpl) & i_smpl.time <= (fault_step_time+4*count*Tsmpl);
 
 sim_i_smpl  = i_smpl.signals.values(idx2,:); 
 sim_di_smpl = di_smpl.signals.values(idx2,:); 

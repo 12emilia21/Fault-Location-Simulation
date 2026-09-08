@@ -28,6 +28,10 @@ static double L_est   = 0;
 // Outputs
 static double  R_out   = 0; 
 static double  L_out   = 0; 
+
+// Debug
+static int samples_bis = 0;
+
 static double  i_smpl  = 0;
 static double  di_smpl = 0;
 
@@ -50,6 +54,7 @@ void pivot (int *piv, int n_smpls){
     if(sqrt(n2_partial) > sqrt(n1_partial)){
         piv[0] = 1; piv[1] = 0;
     }
+	return; 
 }
 
 // Execute algorithm
@@ -154,11 +159,12 @@ void solve( double io_sim,  double vo_sim,       double Ts,
     int last     ;
 	int second   ;
 	int prev     ;
-	int n_smpl = N/n_blk;
+	int n_smpl  = N/n_blk;
 
     if(!en_l && !en_prev && enable > 0) {
         en_l = 1;
         samples = 0;
+        samples_bis = 0; 
         head = 0;
         R_est = 0;
         L_est = 0;
@@ -185,7 +191,7 @@ void solve( double io_sim,  double vo_sim,       double Ts,
                         di_buf[idx_prev] = (i_buf[idx_out] - i_buf[idx_prev]) / Ts;
                     }
         	}
-            // debugging 
+            // debugging-1
             *i_smpl  = i_buf[idx_prev];
             *di_smpl = di_buf[idx_prev];
 
@@ -196,47 +202,59 @@ void solve( double io_sim,  double vo_sim,       double Ts,
         // All samples collected
         if(samples == N) {
 
-            first  = head % N;
-            last   = (head + N - 1) % N;
-            second = (first + 1) % N;
-            prev   = (last + N - 1) % N;
+            if (samples_bis == 0){
+                first  = head % N;
+                last   = (head + N - 1) % N;
+                second = (first + 1) % N;
+                prev   = (last + N - 1) % N;
 
-            // Derivatives on the extremes
-            di_buf[first] = (i_buf[second] - i_buf[first]) / Ts; // forward
-            di_buf[last]  = (i_buf[last] - i_buf[prev]) / Ts;    // backward
+                // Derivatives on the extremes
+                di_buf[first] = (i_buf[second] - i_buf[first]) / Ts; // forward
+                di_buf[last]  = (i_buf[last] - i_buf[prev]) / Ts;    // backward
 
-            if(norm){
-                // Get maximum values 
-                for(int i=0;i<N;i++) {	
-                    if (fabs(i_buf[i])>i_max)   i_max = fabs(i_buf[i]); 
-                    if (fabs(di_buf[i])>di_max) di_max = fabs(di_buf[i]); 	
+                if(norm){
+                    // Get maximum values 
+                    for(int i=0;i<N;i++) {	
+                        if (fabs(i_buf[i])>i_max)   i_max = fabs(i_buf[i]); 
+                        if (fabs(di_buf[i])>di_max) di_max = fabs(di_buf[i]); 	
+                    }
+
+                    // Normalize
+                    for(int i=0;i<N;i++) {
+                            i_buf[i]  = i_buf[i]/i_max;
+                            di_buf[i] = di_buf[i]/di_max;
+                        }
+                }
+                else {
+                    i_max = 1; 
+                    di_max= 1;
+                }
+                samples_bis++;
+            }
+
+            else if (samples_bis < N && samples > 0){
+                // debugging-1
+                *i_smpl  = i_buf[samples_bis];
+                *di_smpl = di_buf[samples_bis];
+                samples_bis++;
+            }
+            
+            else {
+                double sol[2]={0};
+
+                LS_QR(n_smpl, offset, sol);
+                
+                if(enable_fault){
+                    R_est = sol[0]/i_max;
+                    L_est = sol[1]/di_max;
+                }
+                else{
+                    R_est = 0;
+                    L_est = 0;
                 }
 
-                // Normalize
-                for(int i=0;i<N;i++) {
-                        i_buf[i]  = i_buf[i]/i_max;
-                        di_buf[i] = di_buf[i]/di_max;
-                    }
-            }
-            else {
-                i_max = 1; 
-                di_max= 1;
-            }
-
-            double sol[2]={0};
-
-            LS_QR(n_smpl, offset, sol);
-            
-            if(enable_fault){
-                R_est = sol[0]/i_max;
-                L_est = sol[1]/di_max;
-            }
-            else{
-                R_est = 0;
-                L_est = 0;
-            }
-
-            en_l = 0; // batch completo
+                en_l = 0; // batch completo
+            }   
         }
     }
 
@@ -244,4 +262,6 @@ void solve( double io_sim,  double vo_sim,       double Ts,
 
     *R_out = R_est;
     *L_out = L_est;
+
+	 return; 
 }

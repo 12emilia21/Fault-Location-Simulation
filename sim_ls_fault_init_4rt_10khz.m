@@ -150,20 +150,20 @@ offset   = (blk_an-1)*floor(count/n_blks);
 sim('ls_fault_sw_4rt_10khz_bis.slx');
 %sim('ls_fault_sw_4rt.slx');
 
-% Debug results 
-idx2 = i_smpl.time >= (fault_step_time-10*Tsmpl) & i_smpl.time <= (fault_step_time+4*count*Tsmpl);
+% Debug results current samples 
+idx1 = i_smpl.time >= (fault_step_time-10*Tsmpl) & i_smpl.time <= (fault_step_time+4*count*Tsmpl);
 
-sim_i_smpl  = i_smpl.signals.values(idx2,:); 
-sim_di_smpl = di_smpl.signals.values(idx2,:); 
+sim_i_smpl  = i_smpl.signals.values(idx1,:); 
+sim_di_smpl = di_smpl.signals.values(idx1,:); 
 
 %Almacenamiento de resultados 
 %{
-idx2 = r_est.time >= (fault_step_time-0.001) & r_est.time <= (fault_step_time+0.0025);
-time_full_sim = r_est.time(idx2);
-r_est_sim = r_est.signals.values(idx2,:); 
-l_est_sim = l_est.signals.values(idx2,:); 
-r_err_sim = r_err.signals.values(idx2,:); 
-l_err_sim = l_err.signals.values(idx2,:); 
+idx1 = r_est.time >= (fault_step_time-0.001) & r_est.time <= (fault_step_time+0.0025);
+time_full_sim = r_est.time(idx1);
+r_est_sim = r_est.signals.values(idx1,:); 
+l_est_sim = l_est.signals.values(idx1,:); 
+r_err_sim = r_err.signals.values(idx1,:); 
+l_err_sim = l_err.signals.values(idx1,:); 
 
 
 save('C:\Users\mem21\OneDrive\Documents\MATLAB\ls_solution\fault_location_sims\estimations_25.mat', 'time_full_sim','r_est_sim', 'l_est_sim', 'r_err_sim', 'l_err_sim')

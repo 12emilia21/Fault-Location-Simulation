@@ -7,15 +7,14 @@
 #define V_SAT    ParamRealData(2,0)
 #define I_SAT    ParamRealData(3,0)
 #define NORM     ParamRealData(4,0)
-#define OFFSET   ParamRealData(5,0)
-#define N_BLK    ParamRealData(6,0)
+#define N_BLK    ParamRealData(5,0)
 
-static double i_buf[MAX_COUNT+1];   
-static double v_buf[MAX_COUNT+1];   
-static double di_buf[MAX_COUNT+1];  
+static double i_buf[MAX_COUNT];   
+static double v_buf[MAX_COUNT];   
+static double di_buf[MAX_COUNT];  
 
-static double i_max  = 0;
-static double di_max = 0;
+static double i_max  = 1;
+static double di_max = 1;
 
 static int head    = 0;
 static int samples = 0;
@@ -25,15 +24,22 @@ static int en_prev = 0;
 static double R_est   = 0;
 static double L_est   = 0;
 
+static double A[MAX_COUNT][2], B[MAX_COUNT];
+
 // Outputs
 static double  R_out   = 0; 
 static double  L_out   = 0; 
 
+// Debug outputs
+static double  di_smpl_pp = 0;
+static double  i_smpl_pp  = 0;
+static double  v_smpl_pp  = 0;
+static double  i_smpl     = 0; 
+static double  v_smpl     = 0; 
+
 // Debug
 static int samples_bis = 0;
-
-static double  i_smpl  = 0;
-static double  di_smpl = 0;
+static int output_data = 0; 
 
 // Obtain norm or analyzed array
 double norm (double *buff, int n_smpls){
@@ -64,18 +70,22 @@ void LS_QR(int n_smpls, int offset, double *sol){
     int piv[2] = {0,1};
     pivot(piv, n_smpls);
 
-    // Build matrices A, B
-    double A[MAX_COUNT+1][2], B[MAX_COUNT+1];
-
     for(int i=0;i<n_smpls;i++){
-        A[i][0] = i_buf [offset+i];
-        A[i][1] = di_buf[offset+i];
-        B[i]    = v_buf [offset+i];
+        if (i>offset){
+            A[i][0] = i_buf [i];
+            A[i][1] = di_buf[i];
+            B[i]    = v_buf [i];
+        }
+        else {
+            A[i][0] = 0;
+            A[i][1] = 0;
+            B[i]    = 0;
+        }
     }
-
+    
     // Householder 1
     double alpha = 0;
-    double v_h[MAX_COUNT+1];
+    double v_h[MAX_COUNT];
     double vv  =0;
     double dot =0;
     double dot1=0;
@@ -141,15 +151,24 @@ void LS_QR(int n_smpls, int offset, double *sol){
 
     sol[piv[0]]=x1;
     sol[piv[1]]=x2;
-
+    
     return; 
 }
 
-void solve( double io_sim,  double vo_sim,       double Ts,
-            double enable,  double enable_fault, int count,
-            int    norm,    int offset,          int n_blk, 
-            double *R_out,  double *L_out, 
-            double *i_smpl, double *di_smpl)
+void find_max_min(double *vect, double sample){
+
+    if(fabs(sample)>vect[0]) vect[0] = fabs(sample); 
+    else if (fabs(sample)<vect[1]) vect[1] = fabs(sample); 
+    
+    return; 
+}
+
+void solve( double io_sim    , double vo_sim      , double Ts,
+            double enable    , double enable_fault, int count,
+            int    norm      , int    blk_an      , int n_blk, 
+            double *R_out    , double *L_out      , 
+            double *A0_smpl, double *A1_smpl, double *B_smpl,
+            double *i_smpl   , double *v_smpl)
 {
     int N = count;
 	int idx_out  ; 	
@@ -159,15 +178,35 @@ void solve( double io_sim,  double vo_sim,       double Ts,
     int last     ;
 	int second   ;
 	int prev     ;
-	int n_smpl  = N/n_blk;
+
+    double sol[2]={0};
+
+    // Find max value for normalization 
+    double max_min_v[2]; 
+    double max_min_i[2]; 
+
+    // Proteger offset
+    if(blk_an < 1)     blk_an = 1;
+    if(blk_an > n_blk) blk_an = n_blk;
+    int offset = (blk_an-1)* N/n_blk;
 
     if(!en_l && !en_prev && enable > 0) {
-        en_l = 1;
-        samples = 0;
-        samples_bis = 0; 
-        head = 0;
-        R_est = 0;
-        L_est = 0;
+        en_l         = 1;
+        samples      = 0;
+        samples_bis  = 0; 
+        head         = 0;
+        output_data  = 0;
+        R_est        = 0;
+        L_est        = 0;
+        max_min_v[0] = 0;
+		max_min_v[1] = 0; 
+        max_min_i[0] = 0; 
+		max_min_i[1] = 0; 
+        for (int i=0; i<MAX_COUNT; i++){
+            A[i][0]=0;
+            A[i][1]=0; 
+            B[i]=0;
+        }
     }
 
     if(en_l) {
@@ -179,8 +218,12 @@ void solve( double io_sim,  double vo_sim,       double Ts,
         	idx_prev2 = (head + N - 2) % N;
 
         	// Store samples
+            v_buf[idx_out] = vo_sim;
         	i_buf[idx_out] = io_sim;
-        	v_buf[idx_out] = vo_sim;
+
+            // Find input data max/min values
+            find_max_min(max_min_v, vo_sim);
+            find_max_min(max_min_i, io_sim); 
 
         	// Calculate central derivatives
         	if(samples > 1) {
@@ -191,75 +234,77 @@ void solve( double io_sim,  double vo_sim,       double Ts,
                         di_buf[idx_prev] = (i_buf[idx_out] - i_buf[idx_prev]) / Ts;
                     }
         	}
-            // debugging-1
-            *i_smpl  = i_buf[idx_prev];
-            *di_smpl = di_buf[idx_prev];
 
         	head = (head + 1) % N;
         	samples++;
-		  }
+		}
 
         // All samples collected
         if(samples == N) {
+            first  = head % N;
+            last   = (head + N - 1) % N;
+            second = (first + 1) % N;
+            prev   = (last + N - 1) % N;
 
-            if (samples_bis == 0){
-                first  = head % N;
-                last   = (head + N - 1) % N;
-                second = (first + 1) % N;
-                prev   = (last + N - 1) % N;
+            // Derivatives on the extremes
+            di_buf[first] = (i_buf[second] - i_buf[first]) / Ts; // forward
+            di_buf[last]  = (i_buf[last] - i_buf[prev]) / Ts;    // backward
 
-                // Derivatives on the extremes
-                di_buf[first] = (i_buf[second] - i_buf[first]) / Ts; // forward
-                di_buf[last]  = (i_buf[last] - i_buf[prev]) / Ts;    // backward
-
-                if(norm){
-                    // Get maximum values 
-                    for(int i=0;i<N;i++) {	
-                        if (fabs(i_buf[i])>i_max)   i_max = fabs(i_buf[i]); 
-                        if (fabs(di_buf[i])>di_max) di_max = fabs(di_buf[i]); 	
-                    }
-
-                    // Normalize
-                    for(int i=0;i<N;i++) {
-                            i_buf[i]  = i_buf[i]/i_max;
-                            di_buf[i] = di_buf[i]/di_max;
-                        }
+            if(norm){
+                // Get maximum values 
+                for(int i=0;i<N;i++) {	
+                    if (fabs(i_buf[i])>i_max)   i_max = fabs(i_buf[i]); 
+                    if (fabs(di_buf[i])>di_max) di_max = fabs(di_buf[i]); 	
                 }
-                else {
-                    i_max = 1; 
-                    di_max= 1;
-                }
-                samples_bis++;
-            }
-
-            else if (samples_bis < N && samples > 0){
-                // debugging-1
-                *i_smpl  = i_buf[samples_bis];
-                *di_smpl = di_buf[samples_bis];
-                samples_bis++;
-            }
             
+                // Normalize
+                for(int i=0;i<N;i++) {
+                        i_buf[i]  = i_buf[i]/i_max;
+                        di_buf[i] = di_buf[i]/di_max;
+                    }
+            }
             else {
-                double sol[2]={0};
+                i_max = 1; 
+                di_max= 1;
+            }
 
-                LS_QR(n_smpl, offset, sol);
-                
-                if(enable_fault){
-                    R_est = sol[0]/i_max;
-                    L_est = sol[1]/di_max;
-                }
-                else{
-                    R_est = 0;
-                    L_est = 0;
-                }
+            LS_QR(N, offset, sol);
 
-                en_l = 0; // batch completo
-            }   
-        }
+            if(enable_fault){
+                R_est = sol[0];
+                L_est = sol[1];
+            }
+            else{
+                R_est = 0;
+                L_est = 0;
+                A[samples_bis][0] = 0;
+                A[samples_bis][1] = 0;
+                B[samples_bis]    = 0;
+            }
+
+            en_l        = 0; // batch completo
+            output_data = 1; 
+        }  
+    }
+
+    if (output_data==1 && en_l==0 && samples_bis < N && enable_fault){
+        *A0_smpl = A[samples_bis][0];
+        *A1_smpl = A[samples_bis][1];
+        *B_smpl  = B[samples_bis];
+        *i_smpl  = i_buf[samples_bis];   // con offset, para comparar con A
+        *v_smpl  = v_buf[samples_bis];
+        samples_bis++;
+        if (samples_bis==N) output_data = 0; 
+    }
+    else {
+        *A0_smpl = 0;
+        *A1_smpl = 0; 
+        *B_smpl  = 0;
+        *i_smpl  = 0; 
+        *v_smpl  = 0;
     }
 
     en_prev = enable;
-
     *R_out = R_est;
     *L_out = L_est;
 

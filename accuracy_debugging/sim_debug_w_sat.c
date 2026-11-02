@@ -71,8 +71,10 @@ void pivot (int *piv, int n_smpls){
 }
 
 // Execute algorithm
-void LS_QR(int n_smpls, int offset, double *sol){
+void LS_QR(int n_smpls_orig, int offset, double *sol){
 
+    // Debug accuracy 
+    int n_smpls = n_smpls_orig-1; 
     // Pivot
     int piv[2] = {0,1};
     pivot(piv, n_smpls);
@@ -310,7 +312,20 @@ void solve( double io_sim    , double vo_sim      , double Ts,
 
             // Derivatives on the extremes
             //di_buf[first] = (i_buf[second] - i_buf[first]) / Ts; // forward
-            //di_buf[last]  = (i_buf[last] - i_buf[prev]) / Ts;    // backward
+            di_buf[last]  = (i_buf[last] - i_buf[prev]) / Ts;    // backward
+
+            // Debug printing
+            /*
+            for (int i=0; i<N; i++){
+                printf("di buffer %d %f \n", i, di_buf[i]); 
+            }
+            for (int i=0; i<N; i++){
+                printf("i buffer %d %f \n", i, i_buf[i]); 
+            }
+            for (int i=0; i<N; i++){
+                printf("v buffer %d %f \n", i, v_buf[i]); 
+            }
+            */
 
             if(norm){
                 // Get maximum values 

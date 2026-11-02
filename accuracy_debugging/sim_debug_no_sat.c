@@ -3,14 +3,12 @@
 
 #define MAX_COUNT 512
 #define NUM_PARAMS 4
-#define TS          ParamRealData(0,0)
-#define COUNT       ParamRealData(1,0)
-#define NORM        ParamRealData(2,0)
-#define N_BLK       ParamRealData(3,0)
-#define V_SAT_MIN   ParamRealData(4,0)
-#define V_SAT_MAX   ParamRealData(5,0)
-#define I_SAT_MIN   ParamRealData(6,0)
-#define I_SAT_MAX   ParamRealData(7,0)
+#define TS       ParamRealData(0,0)
+#define COUNT    ParamRealData(1,0)
+#define V_SAT    ParamRealData(2,0)
+#define I_SAT    ParamRealData(3,0)
+#define NORM     ParamRealData(4,0)
+#define N_BLK    ParamRealData(5,0)
 
 static double i_buf[MAX_COUNT];   
 static double v_buf[MAX_COUNT];   
@@ -23,10 +21,6 @@ static int head    = 0;
 static int samples = 0;
 static int en_l    = 0;
 static int en_prev = 0;
-
-static int nsat_counter      = 0; 
-static int nsat_counter_prev = 0; 
-static int sat_counter       = 0; 
 
 static double R_est   = 0;
 static double L_est   = 0;
@@ -170,30 +164,9 @@ void find_max_min(double *vect, double sample){
     return; 
 }
 
-void derivatives(double *di_buf, double *i_buf, int index, double Ts){
-    if(nsat_counter > 1) {
-        if(nsat_counter > 2) {
-                di_buf[index-1] = (i_buf[index] - i_buf[index-2]) / (2*Ts);
-            } 
-        else {
-            di_buf[index-1] = (i_buf[index] - i_buf[index-1]) / Ts;
-        }
-    }
-    else if (sat_counter==0 && nsat_counter_prev>1) 
-        di_buf[index-1] = (i_buf[index-1] - i_buf[index-2]) / Ts; 
-
-    else 
-        di_buf[index-1] = 0;
-
-    nsat_counter_prev = nsat_counter; 
-
-    return; 
-}
-
 void solve( double io_sim    , double vo_sim      , double Ts,
             double enable    , double enable_fault, int count,
             int    norm      , int    blk_an      , int n_blk, 
-				double v_sat_min , double v_sat_max   , double i_sat_min , double i_sat_max, 
             double *R_out    , double *L_out      , 
             double *A0_smpl, double *A1_smpl, double *B_smpl,
             double *i_smpl   , double *v_smpl)
@@ -238,7 +211,7 @@ void solve( double io_sim    , double vo_sim      , double Ts,
     }
 
     if(en_l) {
-		if(samples < N && enable_fault) {
+		if(samples < N) {
 
 		  	// Update index in circular buffer
         	idx_out   = head;          
@@ -246,30 +219,17 @@ void solve( double io_sim    , double vo_sim      , double Ts,
         	idx_prev2 = (head + N - 2) % N;
 
         	// Store samples
-         /*v_buf[idx_out] = vo_sim;
-        	i_buf[idx_out] = io_sim;*/
+         v_buf[idx_out] = vo_sim;
+        	i_buf[idx_out] = io_sim;
 
 			//printf("io samples %f \n", io_sim); 
-			//printf("vo samples %f \n", vo_sim);  
-			
-           if(vo_sim>v_sat_min && vo_sim<v_sat_max && io_sim>i_sat_min && io_sim<i_sat_max){
-                v_buf[idx_out] = vo_sim;
-        	    	 i_buf[idx_out] = io_sim;
-                sat_counter    = 0;
-                nsat_counter	 = nsat_counter+1; 
-            }
-            else {
-                v_buf[idx_out] = 0;
-        	    	 i_buf[idx_out] = 0;
-                nsat_counter = 0;
-                sat_counter  = sat_counter+1;
-            }
-			//printf("no sat samples %d \n", nsat_counter);  
-			//printf("sat samples %d \n", sat_counter);  
+			//printf("vo samples %f \n", vo_sim); 
 
+            // Find input data max/min values
+            find_max_min(max_min_v, vo_sim);
+            find_max_min(max_min_i, io_sim); 
 
         	// Calculate central derivatives
-			/*
         	if(samples > 1) {
                 if(samples > 2) {
                         di_buf[idx_prev] = (i_buf[idx_out] - i_buf[idx_prev2]) / (2*Ts);
@@ -278,28 +238,13 @@ void solve( double io_sim    , double vo_sim      , double Ts,
                         di_buf[idx_prev] = (i_buf[idx_out] - i_buf[idx_prev]) / Ts;
                     }
         	}
-			*/
-			derivatives(di_buf, i_buf, nsat_counter, idx_out, Ts);
 
         	head = (head + 1) % N;
         	samples++;
 		}
 
         // All samples collected
-        if (samples==N && enable_fault){
-            for (int i=0; i<N; i++){
-                printf("di buffer %d %f \n", i, di_buf[i]); 
-            }
-            for (int i=0; i<N; i++){
-                printf("i buffer %d %f \n", i, i_buf[i]); 
-            }
-            for (int i=0; i<N; i++){
-                printf("v buffer %d %f \n", i, v_buf[i]); 
-            }
-				samples++;
-        }
-
-        if(samples == 5*N) {
+        if(samples == N) {
             first  = head % N;
             last   = (head + N - 1) % N;
             second = (first + 1) % N;

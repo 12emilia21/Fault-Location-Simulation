@@ -28,6 +28,374 @@ static int nsat_counter      = 0;
 static int nsat_counter_prev = 0; 
 static int sat_counter       = 0; 
 
+static int del_smpl = 0;
+
+static double R_est   = 0;
+static double L_est   = 0;
+
+static double A[MAX_COUNT][2], B[MAX_COUNT];
+
+// Outputs
+static double  R_out   = 0; 
+static double  L_out   = 0; 
+
+// Debug outputs
+static double  di_smpl_pp = 0;
+static double  i_smpl_pp  = 0;
+static double  v_smpl_pp  = 0;
+static double  i_smpl     = 0; 
+static double  v_smpl     = 0; 
+
+// Debug
+static int samples_bis = 0;
+static int output_data = 0; 
+
+// Obtain norm or analyzed array
+double norm (double *buff, int n_smpls){
+    double norm_val = 0;
+
+    for(int i=0;i<n_smpls;i++) {
+        norm_val += buff[i]*buff[i];
+    }
+
+    return norm_val; 
+}
+
+// Pivot 
+void pivot (int *piv, int n_smpls){
+    double n1_partial = norm(i_buf, n_smpls);
+    double n2_partial = norm(di_buf, n_smpls);
+
+    if(sqrt(n2_partial) > sqrt(n1_partial)){
+        piv[0] = 1; piv[1] = 0;
+    }
+	return; 
+}
+
+// Execute algorithm
+void LS_QR(int n_smpls_orig, int offset, double *sol){
+
+    // Debug accuracy 
+    int n_smpls = n_smpls_orig-1; 
+    // Pivot
+    int piv[2] = {0,1};
+    pivot(piv, n_smpls);
+
+    for(int i=0;i<n_smpls;i++){
+        if (i>offset){
+            A[i][0] = i_buf [i];
+            A[i][1] = di_buf[i];
+            B[i]    = v_buf [i];
+        }
+        else {
+            A[i][0] = 0;
+            A[i][1] = 0;
+            B[i]    = 0;
+        }
+    }
+    
+    // Householder 1
+    double alpha = 0;
+    double v_h[MAX_COUNT];
+    double vv  =0;
+    double dot =0;
+    double dot1=0;
+
+    for(int i=0;i<n_smpls;i++) {
+        alpha += A[i][piv[0]]*A[i][piv[0]];
+        v_h[i] = A[i][piv[0]];
+        if(i>0) {
+            vv  += v_h[i]*v_h[i];
+            dot += v_h[i]*A[i][piv[1]];
+            dot1+= v_h[i]*B[i];
+        }
+    }
+
+    alpha = sqrt(alpha);
+
+    if(A[0][piv[0]]>0) alpha=-alpha;
+
+    v_h[0]-=alpha;
+
+    vv  += v_h[0]*v_h[0];
+    dot += v_h[0]*A[0][piv[1]];
+    dot1+= v_h[0]*B[0];
+
+    double beta=2.0/vv;
+
+    for(int i=0;i<n_smpls;i++) {
+        A[i][piv[1]]-=beta*v_h[i]*dot;
+        B[i]-=beta*v_h[i]*dot1;
+    }
+
+    // Householder 2
+    double alpha2=0;
+    double v2[MAX_COUNT];
+    double v2v2=0;
+    double dot2=0;
+
+    for(int i=0;i<n_smpls;i++) {
+        if(i>0) alpha2+=A[i][piv[1]]*A[i][piv[1]];
+        if(i<(n_smpls-1)){
+            v2[i]=A[i+1][piv[1]];
+            v2v2+=v2[i]*v2[i];
+            dot2+=v2[i]*B[i+1];
+        }
+    }
+        
+    alpha2=sqrt(alpha2);
+
+    if(A[1][piv[1]]>0) alpha2=-alpha2;
+
+    v2[0]-= alpha2;
+    v2v2 += v2[0]*v2[0];
+    dot2 += v2[0]*B[1];
+
+    double beta2=2.0/v2v2;
+
+    for(int i=0;i<n_smpls-1;i++) B[i+1]-=beta2*v2[i]*dot2;
+
+    // Solve R*X=Y
+    double R11=alpha, R12=A[0][piv[1]], R22=alpha2;
+    double x2 = B[1]/R22;
+    double x1 = (B[0]-R12*x2)/R11;
+
+    sol[piv[0]]=x1;
+    sol[piv[1]]=x2;
+    
+    return; 
+}
+
+void find_max_min(double *vect, double sample){
+
+    if(fabs(sample)>vect[0]) vect[0] = fabs(sample); 
+    else if (fabs(sample)<vect[1]) vect[1] = fabs(sample); 
+    
+    return; 
+}
+
+void derivatives(double *di_buf, double *i_buf, double *v_buf, int index, double Ts){
+    if(nsat_counter > 1) {
+        if(nsat_counter > 2) {
+                di_buf[index-1] = (i_buf[index] - i_buf[index-2]) / (2*Ts);
+            } 
+        else {
+            di_buf[index-1] = 0; 
+            del_smpl = 1; 
+        }
+    }
+    else if (sat_counter==1 && nsat_counter_prev>1) {
+        di_buf[index-1] = 0;
+        del_smpl        = 1;
+	 }
+    else 
+        di_buf[index-1] = 0;
+
+    nsat_counter_prev = nsat_counter; 
+
+    return; 
+}
+
+void solve( double io_sim    , double vo_sim      , double Ts,
+            double enable    , double enable_fault, int count,
+            int    norm      , int    blk_an      , int n_blk, 
+				double v_sat_min , double v_sat_max   , double i_sat_min , double i_sat_max, 
+            double *R_out    , double *L_out      , 
+            double *A0_smpl, double *A1_smpl, double *B_smpl,
+            double *i_smpl   , double *v_smpl)
+{
+    int N = count;
+	int idx_out  ; 	
+    int idx_prev ;
+    int idx_prev2;
+	int first    ;
+    int last     ;
+	int second   ;
+	int prev     ;
+
+    double sol[2]={0};
+
+    // Find max value for normalization 
+    double max_min_v[2]; 
+    double max_min_i[2]; 
+
+    // Proteger offset
+    if(blk_an < 1)     blk_an = 1;
+    if(blk_an > n_blk) blk_an = n_blk;
+    int offset = (blk_an-1)* N/n_blk;
+
+    if(!en_l && !en_prev && enable > 0) {
+        en_l         = 1;
+        samples      = 0;
+        samples_bis  = 0; 
+        head         = 0;
+        output_data  = 0;
+        R_est        = 0;
+        L_est        = 0;
+        max_min_v[0] = 0;
+		max_min_v[1] = 0; 
+        max_min_i[0] = 0; 
+		max_min_i[1] = 0; 
+        del_smpl     = 0; 
+        for (int i=0; i<MAX_COUNT; i++){
+            A[i][0]=0;
+            A[i][1]=0; 
+            B[i]=0;
+        }
+    }
+
+    if(en_l) {
+		if(samples < N && enable_fault) {
+
+		  	// Update index in circular buffer
+        	idx_out   = head;          
+        	idx_prev  = (head + N - 1) % N;
+        	idx_prev2 = (head + N - 2) % N;
+			
+           if(vo_sim>v_sat_min && vo_sim<v_sat_max && io_sim>i_sat_min && io_sim<i_sat_max){
+                v_buf[idx_out] = vo_sim;
+        	    i_buf[idx_out] = io_sim;
+                sat_counter    = 0;
+                nsat_counter	 = nsat_counter+1; 
+            }
+            else {
+                v_buf[idx_out] = 0;
+        	    i_buf[idx_out] = 0;
+                nsat_counter = 0;
+                sat_counter  = sat_counter+1;
+            }
+        	
+            if (del_smpl==1) del_smpl = 2;
+
+			derivatives(di_buf, i_buf, v_buf, idx_out, Ts);
+
+            if (del_smpl==2) {
+                del_smpl         = 0;
+                i_buf[idx_prev2] = 0;
+                v_buf[idx_prev2] = 0;
+            }
+
+        	head = (head + 1) % N;
+        	samples++;
+		}
+
+        if(samples == N) {
+            first  = head % N;
+            last   = (head + N - 1) % N;
+            second = (first + 1) % N;
+            prev   = (last + N - 1) % N;
+
+            // Final derivative
+            di_buf[last]  = 0;
+            i_buf[last]   = 0;
+            v_buf[last]   = 0;  
+
+            // Debug printing
+            //for (int i=0; i<N; i++){
+            //    printf("di (wz) %d %f \n", i, di_buf[i]); 
+            //}
+            //for (int i=0; i<N; i++){
+            //    printf("i (wz) %d %f \n", i, i_buf[i]); 
+            //}
+            //for (int i=0; i<N; i++){
+            //    printf("v (wz) %d %f \n", i, v_buf[i]); 
+            //}
+           
+
+            if(norm){
+                // Get maximum values 
+                for(int i=0;i<N;i++) {	
+                    if (fabs(i_buf[i])>i_max)   i_max = fabs(i_buf[i]); 
+                    if (fabs(di_buf[i])>di_max) di_max = fabs(di_buf[i]); 	
+                }
+            
+                // Normalize
+                for(int i=0;i<N;i++) {
+                        i_buf[i]  = i_buf[i]/i_max;
+                        di_buf[i] = di_buf[i]/di_max;
+                    }
+            }
+            else {
+                i_max = 1; 
+                di_max= 1;
+            }
+
+            LS_QR(N, offset, sol);
+
+            if(enable_fault){
+                R_est = sol[0];
+                L_est = sol[1];
+            }
+            else{
+                R_est = 0;
+                L_est = 0;
+                A[samples_bis][0] = 0;
+                A[samples_bis][1] = 0;
+                B[samples_bis]    = 0;
+            }
+             en_l        = 0; // batch completo
+             output_data = 1; 
+        }  
+    }
+
+    if (output_data==1 && en_l==0 && samples_bis < N && enable_fault){
+        *A0_smpl = A[samples_bis][0];
+        *A1_smpl = A[samples_bis][1];
+        *B_smpl  = B[samples_bis];
+        *i_smpl  = i_buf[samples_bis];   
+        *v_smpl  = v_buf[samples_bis];
+        samples_bis++;
+        if (samples_bis==N) output_data = 0; 
+    }
+    else {
+        *A0_smpl = 0;
+        *A1_smpl = 0; 
+        *B_smpl  = 0;
+        *i_smpl  = 0; 
+        *v_smpl  = 0;
+    }
+
+    en_prev = enable;
+    *R_out = R_est;
+    *L_out = L_est;
+
+	 return; 
+}
+
+// Original 
+
+/*
+
+#include <math.h>
+#include <stdio.h>
+
+#define MAX_COUNT 512
+#define NUM_PARAMS 4
+#define TS          ParamRealData(0,0)
+#define COUNT       ParamRealData(1,0)
+#define NORM        ParamRealData(2,0)
+#define N_BLK       ParamRealData(3,0)
+#define V_SAT_MIN   ParamRealData(4,0)
+#define V_SAT_MAX   ParamRealData(5,0)
+#define I_SAT_MIN   ParamRealData(6,0)
+#define I_SAT_MAX   ParamRealData(7,0)
+
+static double i_buf[MAX_COUNT];   
+static double v_buf[MAX_COUNT];   
+static double di_buf[MAX_COUNT];  
+
+static double i_max  = 1;
+static double di_max = 1;
+
+static int head    = 0;
+static int samples = 0;
+static int en_l    = 0;
+static int en_prev = 0;
+
+static int nsat_counter      = 0; 
+static int nsat_counter_prev = 0; 
+static int sat_counter       = 0; 
+
 static double R_est   = 0;
 static double L_est   = 0;
 
@@ -248,10 +616,6 @@ void solve( double io_sim    , double vo_sim      , double Ts,
         	idx_prev  = (head + N - 1) % N;
         	idx_prev2 = (head + N - 2) % N;
 
-        	// Store samples
-         /*v_buf[idx_out] = vo_sim;
-        	i_buf[idx_out] = io_sim;*/
-
 			//printf("io samples %f \n", io_sim); 
 			//printf("vo samples %f \n", vo_sim);  
 			
@@ -271,38 +635,13 @@ void solve( double io_sim    , double vo_sim      , double Ts,
 			//printf("sat samples %d \n", sat_counter);  
 
 
-        	// Calculate central derivatives
-			/*
-        	if(samples > 1) {
-                if(samples > 2) {
-                        di_buf[idx_prev] = (i_buf[idx_out] - i_buf[idx_prev2]) / (2*Ts);
-                    } 
-                    else {
-                        di_buf[idx_prev] = (i_buf[idx_out] - i_buf[idx_prev]) / Ts;
-                    }
-        	}
-			*/
+        	
 			derivatives(di_buf, i_buf, idx_out, Ts);
 
         	head = (head + 1) % N;
         	samples++;
 		}
 
-        // Print all samples collected and calculated
-		  /*
-        if (samples==N && enable_fault){
-            for (int i=0; i<N; i++){
-                printf("di buffer %d %f \n", i, di_buf[i]); 
-            }
-            for (int i=0; i<N; i++){
-                printf("i buffer %d %f \n", i, i_buf[i]); 
-            }
-            for (int i=0; i<N; i++){
-                printf("v buffer %d %f \n", i, v_buf[i]); 
-            }
-				samples++;
-        }
-        */
 
         if(samples == N) {
             first  = head % N;
@@ -315,7 +654,7 @@ void solve( double io_sim    , double vo_sim      , double Ts,
             di_buf[last]  = (i_buf[last] - i_buf[prev]) / Ts;    // backward
 
             // Debug printing
-            /*
+            
             for (int i=0; i<N; i++){
                 printf("di buffer %d %f \n", i, di_buf[i]); 
             }
@@ -325,7 +664,7 @@ void solve( double io_sim    , double vo_sim      , double Ts,
             for (int i=0; i<N; i++){
                 printf("v buffer %d %f \n", i, v_buf[i]); 
             }
-            */
+           
 
             if(norm){
                 // Get maximum values 
@@ -386,3 +725,4 @@ void solve( double io_sim    , double vo_sim      , double Ts,
 
 	 return; 
 }
+*/
